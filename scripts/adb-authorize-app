@@ -1,0 +1,76 @@
+#!/usr/bin/env python3
+"""安装后的一次性授权；不安装 APK、不重启、不修改当前 ADB 传输。"""
+import datetime
+import json
+from pathlib import Path
+import shlex
+import subprocess
+import sys
+
+
+def main():
+    if len(sys.argv) != 2 or sys.argv[1] in ("-h", "--help"):
+        print(f"用法: {sys.argv[0]} ADB设备序列号或IP:端口")
+        print("备份相关设置，再授权 USB 操作助手并启用原生开发者页面。")
+        return 0 if len(sys.argv) == 2 else 2
+
+    target = sys.argv[1]
+    package = "space.sybb.awatch"
+    service = package + "/.UsbModeService"
+
+    def shell(*args):
+        result = subprocess.run(["adb", "-s", target, "shell", shlex.join(args)],
+                                text=True, capture_output=True, timeout=15, check=True)
+        return result.stdout.strip()
+
+    if not shell("pm", "path", package).startswith("package:"):
+        raise RuntimeError("请先安装本项目 APK；尚未修改任何设置。")
+
+    backup = {
+        "target": target,
+        "device_serial": shell("getprop", "ro.serialno"),
+        "development_settings_enabled": shell("settings", "get", "global", "development_settings_enabled"),
+        "enabled_accessibility_services": shell("settings", "get", "secure", "enabled_accessibility_services"),
+        "accessibility_enabled": shell("settings", "get", "secure", "accessibility_enabled"),
+        "app_package_state": shell("dumpsys", "package", package),
+        "settings_package_state": shell("dumpsys", "package", "com.android.settings"),
+    }
+    folder = Path(__file__).resolve().parent.parent / ".runtime"
+    folder.mkdir(mode=0o700, exist_ok=True)
+    stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+    backup_path = folder / f"authorization-{stamp}.json"
+    with backup_path.open("x", encoding="utf-8") as stream:
+        json.dump(backup, stream, ensure_ascii=False, indent=2)
+    backup_path.chmod(0o600)
+    print(f"原设置已备份：{backup_path}", flush=True)
+
+    previous = backup["enabled_accessibility_services"]
+    enabled = [] if previous in ("null", "") else previous.split(":")
+    if service not in enabled and package + "/" + package + ".UsbModeService" not in enabled:
+        enabled.append(service)
+
+    # 保留所有其他无障碍服务，只加入本应用；不更改 HRTEST 开机接收器。
+    shell("pm", "grant", package, "android.permission.WRITE_SECURE_SETTINGS")
+    shell("settings", "put", "global", "development_settings_enabled", "1")
+    shell("settings", "put", "secure", "enabled_accessibility_services", ":".join(enabled))
+    shell("settings", "put", "secure", "accessibility_enabled", "1")
+    for namespace, key, expected in (
+        ("global", "development_settings_enabled", "1"),
+        ("secure", "enabled_accessibility_services", ":".join(enabled)),
+        ("secure", "accessibility_enabled", "1"),
+    ):
+        if shell("settings", "get", namespace, key) != expected:
+            raise RuntimeError(f"{key} 回读不匹配；请依据 {backup_path} 检查已执行的设置。")
+    print("授权完成。打开“手表调试”即可使用一键 USB、原厂开关和原生开发者选项。")
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except subprocess.CalledProcessError as error:
+        print(f"授权未完成，已停止：{error}", file=sys.stderr)
+        print(error.stderr or error.stdout or "设备没有返回错误详情。", file=sys.stderr)
+        sys.exit(1)
+    except (OSError, RuntimeError, subprocess.SubprocessError) as error:
+        print(f"授权未完成，已停止：{error}", file=sys.stderr)
+        sys.exit(1)

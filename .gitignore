@@ -1,0 +1,6 @@
+.runtime/
+.gradle/
+.idea/
+**/build/
+local.properties
+__pycache__/

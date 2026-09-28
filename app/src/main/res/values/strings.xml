@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">手表调试</string>
+    <string name="usb_mode_service_name">手表调试操作助手</string>
+    <string name="usb_mode_service_description">仅在你点击“开启 USB 调试”后，读取原厂 HRTEST 页面并关闭指定开关。不会操作其他页面，不在后台自动切换。</string>
+</resources>

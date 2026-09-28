@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ ${1:-} == --help || ${1:-} == -h ]]; then
+    printf '用法: %s [USB设备序列号] [手表Wi-Fi IPv4]\n设备出现后立即启用 TCP ADB 5555，再连接 Wi-Fi shell。\n' "$0"
+    exit 0
+fi
+if (( $# > 2 )); then
+    printf '参数过多；使用 --help 查看用法。\n' >&2
+    exit 2
+fi
+
+for tool in adb timeout awk; do
+    command -v "$tool" >/dev/null || { printf '找不到 %s。\n' "$tool" >&2; exit 1; }
+done
+if [[ ! -t 0 ]]; then
+    printf '需要交互终端；后台运行时请放在 tmux 会话中。\n' >&2
+    exit 1
+fi
+
+target=(-d)
+serial=${1:-}
+wifi_ip=${2:-}
+if [[ -n $serial ]]; then
+    target=(-s "$serial")
+fi
+
+trap 'printf "\n已停止等待。\n"; exit 130' INT
+trap 'exit 143' TERM
+adb start-server
+
+# 第一条设备命令就是 tcpip；在启用网络 ADB 前不执行 shell 或采集属性。
+printf '\n[%s] 等待 USB 设备，出现后立即执行 tcpip 5555。\n' "$(date -Is)"
+if adb "${target[@]}" wait-for-usb-device tcpip 5555; then
+    printf '[%s] TCP 模式请求已返回，接下来建立 Wi-Fi ADB。\n' "$(date -Is)"
+else
+    printf '[%s] TCP 模式请求返回非零；可能已触发 adbd 重启，继续连接，不重复切换。\n' "$(date -Is)" >&2
+fi
+
+# tcpip 会重启 adbd。IP 已知时直接连接网络，不依赖 USB 再次出现。
+if [[ -z $wifi_ip ]]; then
+    printf '[%s] 等待 USB 恢复并获取 wlan0 IPv4（最多 60 秒）。\n' "$(date -Is)"
+    if addresses=$(timeout 60s adb "${target[@]}" wait-for-usb-device shell '
+        while :; do
+            addresses=$(ip -4 addr show wlan0 2>/dev/null)
+            case "$addresses" in
+                *"inet "*) printf "%s\n" "$addresses"; exit 0 ;;
+            esac
+            sleep 1
+        done'); then
+        wifi_ip=$(printf '%s\n' "$addresses" | awk '$1 == "inet" {split($2, a, "/"); print a[1]; exit}')
+    fi
+fi
+
+if [[ -z $wifi_ip ]]; then
+    printf '已尝试启用 TCP ADB，但未取得 Wi-Fi IP。请从手表 Wi-Fi 页面读取 IP，再执行 adb connect IP:5555；无需再次切换 tcpip。\n' >&2
+    exit 1
+fi
+
+endpoint="$wifi_ip:5555"
+printf '[%s] 连接网络 ADB：%s\n' "$(date -Is)" "$endpoint"
+
+for attempt in 1 2; do
+    if timeout 10s adb connect "$endpoint" &&
+        actual_serial=$(timeout 10s adb -s "$endpoint" shell getprop ro.serialno); then
+        actual_serial=${actual_serial//$'\r'/}
+        if [[ -n $serial && $actual_serial != "$serial" ]]; then
+            printf '网络设备序列号与目标不符，停止连接：%s\n' "$actual_serial" >&2
+            adb disconnect "$endpoint"
+            exit 1
+        fi
+        printf '\n=== AWATCH_WIFI_ADB_CONNECTED ===\n[%s] 网络 shell 已可用：adb -s %s shell\n' "$(date -Is)" "$endpoint"
+        exec adb -s "$endpoint" shell -tt
+    fi
+    printf '[%s] Wi-Fi ADB 连接失败（%s/2）。\n' "$(date -Is)" "$attempt" >&2
+    if (( attempt < 2 )); then sleep 2; fi
+done
+
+printf '网络连接已失败 2 次，停止自动重试，转人工检查 Wi-Fi 地址、连通性或授权。\n' >&2
+exit 1

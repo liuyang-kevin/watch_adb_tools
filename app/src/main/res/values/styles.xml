@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Awatch" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:colorAccent">#70DEBC</item>
+        <item name="android:colorBackground">#101418</item>
+        <item name="android:windowBackground">#101418</item>
+        <item name="android:textColorPrimary">#F2F6F5</item>
+        <item name="android:textColorSecondary">#B5C5C1</item>
+        <item name="android:colorButtonNormal">#263A34</item>
+        <item name="android:statusBarColor">#101418</item>
+        <item name="android:navigationBarColor">#101418</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:windowActionModeOverlay">true</item>
+    </style>
+</resources>
